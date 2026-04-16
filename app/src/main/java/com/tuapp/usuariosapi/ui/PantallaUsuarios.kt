@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -18,51 +19,92 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.tuapp.usuariosapi.modelo.Usuario
 import com.tuapp.usuariosapi.red.RetrofitClient
+import kotlinx.coroutines.launch
+import java.net.UnknownHostException
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaUsuarios() {
-    var listaUsuarios by remember { mutableStateOf<List<Usuario>>(emptyList()) }
-    var estaCargando by remember { mutableStateOf(true) }
-    var mensajeError by remember { mutableStateOf<String?>(null) }
+    var listaDeUsuarios by remember { mutableStateOf<List<Usuario>>(emptyList()) }
+    var cargandoAlPrincipio by remember { mutableStateOf(true) }
+    var actualizandoAhora by remember { mutableStateOf(false) }
+    var huboError by remember { mutableStateOf<String?>(null) }
+    
+    val alcanceCorrutina = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
-        try {
-            val respuestaApi = RetrofitClient.servicioApi.obtenerListaUsuarios()
-            listaUsuarios = respuestaApi
-        } catch (excepcion: Exception) {
-            mensajeError = "Error al cargar datos: ${excepcion.message}"
-        } finally {
-            estaCargando = false
+    fun traerDatosDesdeInternet() {
+        alcanceCorrutina.launch {
+            huboError = null
+            try {
+                val respuesta = RetrofitClient.servicioApi.obtenerListaUsuarios()
+                listaDeUsuarios = respuesta
+            } catch (e: UnknownHostException) {
+                // Capturamos específicamente el error de "no hay internet"
+                huboError = "Parece que no tienes internet. Revisa tu conexión."
+            } catch (e: Exception) {
+                huboError = "Algo salió mal: ${e.message}"
+            } finally {
+                cargandoAlPrincipio = false
+                actualizandoAhora = false
+            }
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp)
-    ) {
-        Text(
-            text = "Lista de Usuarios",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(vertical = 16.dp)
-        )
+    LaunchedEffect(Unit) {
+        traerDatosDesdeInternet()
+    }
 
-        when {
-            estaCargando -> {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Mis Usuarios", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    titleContentColor = MaterialTheme.colorScheme.primary
+                )
+            )
+        }
+    ) { relleno ->
+        PullToRefreshBox(
+            isRefreshing = actualizandoAhora,
+            onRefresh = {
+                actualizandoAhora = true
+                traerDatosDesdeInternet()
+            },
+            modifier = Modifier.padding(relleno).fillMaxSize()
+        ) {
+            when {
+                cargandoAlPrincipio -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 }
-            }
-            mensajeError != null -> {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(text = mensajeError!!, color = Color.Red)
+
+                huboError != null -> {
+                    Column(
+                        Modifier.fillMaxSize().padding(16.dp), 
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(text = huboError!!, color = Color.Red, modifier = Modifier.padding(bottom = 16.dp))
+                        Button(onClick = { 
+                            cargandoAlPrincipio = true
+                            traerDatosDesdeInternet() 
+                        }) {
+                            Text("Reintentar")
+                        }
+                    }
                 }
-            }
-            else -> {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(listaUsuarios) { usuario ->
-                        TarjetaUsuario(usuario = usuario)
+
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(16.dp)
+                    ) {
+                        items(listaDeUsuarios) { usuario ->
+                            FilaDeUsuario(usuario = usuario)
+                        }
                     }
                 }
             }
@@ -71,11 +113,11 @@ fun PantallaUsuarios() {
 }
 
 @Composable
-fun TarjetaUsuario(usuario: Usuario) {
+fun FilaDeUsuario(usuario: Usuario) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -84,25 +126,20 @@ fun TarjetaUsuario(usuario: Usuario) {
             AsyncImage(
                 model = usuario.avatar ?: "https://via.placeholder.com/150",
                 contentDescription = null,
-                modifier = Modifier.size(56.dp).clip(CircleShape),
+                modifier = Modifier.size(50.dp).clip(CircleShape),
                 contentScale = ContentScale.Crop
             )
-            Spacer(modifier = Modifier.width(14.dp))
+            Spacer(Modifier.width(16.dp))
             Column {
                 Text(
                     text = usuario.nombre ?: "Sin nombre",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = usuario.email ?: "Sin email",
-                    fontSize = 14.sp,
+                    text = usuario.email ?: "Sin correo",
+                    fontSize = 13.sp,
                     color = Color.Gray
-                )
-                Text(
-                    text = "ID: ${usuario.id}",
-                    fontSize = 11.sp,
-                    color = Color.LightGray
                 )
             }
         }
